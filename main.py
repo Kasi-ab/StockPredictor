@@ -14,13 +14,11 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-# Force UTF-8 output so → / ⚠ symbols render on all Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-# ── Import TensorFlow first to prevent DLL conflicts on Windows ──
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"]  = "2"
 import tensorflow as tf
@@ -30,7 +28,7 @@ from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLRO
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")          # non-interactive backend — safe for script runs
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from scipy.signal import stft
@@ -40,19 +38,14 @@ from sklearn.preprocessing import MinMaxScaler
 TICKERS      = ["RELIANCE.NS", "INFY.NS", "WIPRO.NS", "TCS.NS"]
 START_DATE   = "2018-01-01"
 END_DATE     = "2026-01-01"
-
-# STFT parameters  (FIX 1 – was nperseg=32, giving only 17 coarse bins)
-NPERSEG      = 128            # Window length L  → 65 frequency bins
-NOVERLAP     = 120            # Overlap (L-H) → hop=8 days
-FS           = 1              # 1 sample per trading day
-
-PREDICT_STEP = 5              # Predict 5 trading days ahead (Δt)
-
+NPERSEG      = 128
+NOVERLAP     = 120
+FS           = 1
+PREDICT_STEP = 5
 DATA_DIR     = "data/"
 IMAGE_DIR    = "images/"
 MODEL_DIR    = "models/"
 
-# ── Ensure output directories exist (FIX 6) ─────────────────
 for _d in [DATA_DIR, IMAGE_DIR, MODEL_DIR]:
     os.makedirs(_d, exist_ok=True)
 
@@ -68,10 +61,9 @@ def collect_data():
 
     print("\n  Downloading stock data...")
     for ticker in TICKERS:
-        safe = ticker.replace(".", "_")
+        safe     = ticker.replace(".", "_")
         raw_path = os.path.join(DATA_DIR, f"{safe}_raw.csv")
 
-        # ── Use cached CSV if it already exists ──────────────
         if os.path.exists(raw_path) and os.path.getsize(raw_path) > 500:
             print(f"  → {ticker}  (loading cached CSV)")
             signal = pd.read_csv(raw_path, index_col=0, parse_dates=True)
@@ -79,7 +71,6 @@ def collect_data():
             print(f"  → Fetching {ticker} from Yahoo Finance ...")
             df = yf.download(ticker, start=START_DATE, end=END_DATE, progress=False)
 
-            # Flatten MultiIndex columns if present
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
 
@@ -87,14 +78,12 @@ def collect_data():
                 print(f"    ⚠  No data returned for {ticker} — skipping")
                 continue
 
-            # ── Build multivariate signal ─────────────────────
             signal = pd.DataFrame(index=df.index)
             signal["Close"]    = df["Close"]
             signal["Volume"]   = df["Volume"]
-            signal["HL_Range"] = df["High"] - df["Low"]        # daily volatility
-            signal["MA7"]      = df["Close"].rolling(7).mean()  # short-term trend
-            signal["MA30"]     = df["Close"].rolling(30).mean() # long-term trend
-
+            signal["HL_Range"] = df["High"] - df["Low"]
+            signal["MA7"]      = df["Close"].rolling(7).mean()
+            signal["MA30"]     = df["Close"].rolling(30).mean()
             signal.dropna(inplace=True)
             signal.to_csv(raw_path)
             print(f"    Saved → {raw_path}  ({len(signal)} rows, {signal.shape[1]} features)")
@@ -104,7 +93,6 @@ def collect_data():
     if len(all_signals) < 2:
         raise RuntimeError("Not enough tickers downloaded. Check your internet connection.")
 
-    # -- Align all tickers to common trading dates ------------
     close_combined = pd.concat(
         [all_signals[t]["Close"].rename(t) for t in all_signals], axis=1
     )
@@ -117,8 +105,7 @@ def collect_data():
     for ticker in list(all_signals.keys()):
         all_signals[ticker] = all_signals[ticker].loc[common_dates]
 
-    # -- Normalize each feature per stock (Min-Max 0-1) -------
-    scalers = {}
+    scalers           = {}
     normalized_signals = {}
 
     for ticker, sig in all_signals.items():
@@ -131,7 +118,6 @@ def collect_data():
         scalers[ticker]            = scaler
         normalized_signals[ticker] = data_scaled
 
-    # -- Save combined Close reference CSVs -------------------
     close_combined.to_csv(os.path.join(DATA_DIR, "combined_raw.csv"))
     close_combined_norm = pd.DataFrame(
         MinMaxScaler().fit_transform(close_combined),
@@ -149,73 +135,55 @@ def collect_data():
 # Task 2: Signal Processing - STFT + Spectrogram
 # ============================================================
 def generate_spectrograms(data):
-    """
-    Apply STFT on each feature of each stock.
-
-    Pipeline per feature:
-        x(t)  →  sliding-window segmentation
-              →  Fourier Transform per window
-              →  S(t,f) = |STFT|²   (spectrogram)
-              →  dB scale : 10·log10(S + ε)
-
-    Returns: dict  ticker → {"spec": ndarray, "f": freqs, "t": times,
-                               "features": list}
-    """
+    """Apply STFT on each feature of each stock."""
     spectrograms = {}
 
     print()
     for ticker, df in data.items():
-        features = df.columns.tolist()
-        specs_linear = []     # raw |STFT|²
-        specs_db     = []     # log-scale (dB)
+        features     = df.columns.tolist()
+        specs_linear = []
+        specs_db     = []
 
         for feat in features:
-            signal = df[feat].values
+            signal    = df[feat].values
             f, t, Zxx = stft(signal, fs=FS, nperseg=NPERSEG, noverlap=NOVERLAP)
-            S_linear = np.abs(Zxx) ** 2                          # energy
-            S_db     = 10 * np.log10(S_linear + 1e-9)           # dB  (FIX 1)
+            S_linear  = np.abs(Zxx) ** 2
+            S_db      = 10 * np.log10(S_linear + 1e-9)
             specs_linear.append(S_linear)
             specs_db.append(S_db)
 
-        # Stack features as channels: (freq_bins, time_frames, n_features)
         stacked_linear = np.stack(specs_linear, axis=-1)
         stacked_db     = np.stack(specs_db,     axis=-1)
 
         spectrograms[ticker] = {
-            "spec"     : stacked_db,       # use dB version for CNN input
+            "spec"     : stacked_db,
             "spec_raw" : stacked_linear,
             "f"        : f,
             "t"        : t,
             "features" : features
         }
 
-        # Save .npy (dB version)
-        safe = ticker.replace(".", "_")
+        safe     = ticker.replace(".", "_")
         npy_path = os.path.join(DATA_DIR, f"{safe}_spectrogram.npy")
         np.save(npy_path, stacked_db)
 
-        # -- Per-feature spectrogram panel image --------------
         n_feat = len(features)
         fig, axes = plt.subplots(1, n_feat, figsize=(4 * n_feat, 4))
         if n_feat == 1:
             axes = [axes]
         fig.suptitle(f"Multi-Feature Spectrograms — {ticker}", fontsize=13, fontweight="bold")
-
         for idx, (feat, S_db) in enumerate(zip(features, specs_db)):
-            ax = axes[idx]
+            ax   = axes[idx]
             mesh = ax.pcolormesh(t, f, S_db, shading="gouraud", cmap="inferno")
             ax.set_title(feat, fontsize=10)
             ax.set_xlabel("Time (days)")
             ax.set_ylabel("Freq (cycles/day)" if idx == 0 else "")
             plt.colorbar(mesh, ax=ax, label="dB")
-
         plt.tight_layout()
-        img_path = os.path.join(IMAGE_DIR, f"{safe}_multifeature_spec.png")
-        plt.savefig(img_path, dpi=150)
+        plt.savefig(os.path.join(IMAGE_DIR, f"{safe}_multifeature_spec.png"), dpi=150)
         plt.close()
 
-        # -- Single Close spectrogram image -------------------
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax    = plt.subplots(figsize=(10, 4))
         S_close_db = specs_db[0]
         vmin, vmax = np.percentile(S_close_db, [5, 95])
         mesh = ax.pcolormesh(t, f, S_close_db, shading="gouraud",
@@ -225,8 +193,7 @@ def generate_spectrograms(data):
         ax.set_ylabel("Frequency (cycles/day)")
         plt.colorbar(mesh, ax=ax, label="Power (dB)")
         plt.tight_layout()
-        img_path2 = os.path.join(IMAGE_DIR, f"{safe}_spectrogram.png")
-        plt.savefig(img_path2, dpi=150)
+        plt.savefig(os.path.join(IMAGE_DIR, f"{safe}_spectrogram.png"), dpi=150)
         plt.close()
 
         print(f"  → {ticker}")
@@ -242,12 +209,10 @@ def generate_spectrograms(data):
 # ============================================================
 def visualize(data, spectrograms):
     """Plot time series, frequency spectrum, and spectrograms."""
-
     print()
 
-    # -- Plot 1: All stocks normalized Close ------------------
     fig, ax = plt.subplots(figsize=(12, 4))
-    colors = ["steelblue", "darkorange", "seagreen", "mediumpurple"]
+    colors  = ["steelblue", "darkorange", "seagreen", "mediumpurple"]
     for i, ticker in enumerate(data):
         ax.plot(data[ticker].index, data[ticker]["Close"],
                 label=ticker, linewidth=1.2, color=colors[i % len(colors)])
@@ -262,17 +227,15 @@ def visualize(data, spectrograms):
     plt.close()
     print(f"  Saved → {path}")
 
-    # -- Per-stock: Time series + FFT + Spectrogram -----------
     for ticker in data:
-        signal      = data[ticker]["Close"].values
-        spec_data   = spectrograms[ticker]
-        S_db        = spec_data["spec"][:, :, 0]   # Close price channel (dB)
-        f_axis      = spec_data["f"]
-        t_axis      = spec_data["t"]
-        N           = len(signal)
-        dates       = data[ticker].index
+        signal    = data[ticker]["Close"].values
+        spec_data = spectrograms[ticker]
+        S_db      = spec_data["spec"][:, :, 0]
+        f_axis    = spec_data["f"]
+        t_axis    = spec_data["t"]
+        N         = len(signal)
+        dates     = data[ticker].index
 
-        # FFT of normalized Close signal
         fft_vals = np.abs(np.fft.rfft(signal))
         fft_freq = np.fft.rfftfreq(N, d=1)
 
@@ -280,7 +243,6 @@ def visualize(data, spectrograms):
         gs  = gridspec.GridSpec(1, 3, figure=fig, wspace=0.35)
         fig.suptitle(f"{ticker} - Signal Analysis", fontsize=14, fontweight="bold")
 
-        # -- Subplot 1: Time Series ----------------------------
         ax0 = fig.add_subplot(gs[0])
         ax0.plot(dates, signal, color="steelblue", linewidth=1)
         ax0.set_title("Time Series  p(t)")
@@ -289,9 +251,7 @@ def visualize(data, spectrograms):
         ax0.grid(True, alpha=0.3)
         ax0.tick_params(axis="x", rotation=30)
 
-        # -- Subplot 2: Frequency Spectrum ---------------------
-        ax1 = fig.add_subplot(gs[1])
-        # Skip DC (index 0) for dominant frequency detection
+        ax1      = fig.add_subplot(gs[1])
         dom_idx  = np.argmax(fft_vals[1:]) + 1
         dom_freq = fft_freq[dom_idx]
         ax1.plot(fft_freq, fft_vals, color="darkorange", linewidth=1)
@@ -303,8 +263,7 @@ def visualize(data, spectrograms):
         ax1.legend(fontsize=8)
         ax1.grid(True, alpha=0.3)
 
-        # -- Subplot 3: Spectrogram (dB) -----------------------
-        ax2 = fig.add_subplot(gs[2])
+        ax2        = fig.add_subplot(gs[2])
         vmin, vmax = np.percentile(S_db, [2, 98])
         mesh = ax2.pcolormesh(t_axis, f_axis, S_db, shading="gouraud",
                               cmap="inferno", vmin=vmin, vmax=vmax)
