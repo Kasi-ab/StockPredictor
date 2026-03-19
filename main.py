@@ -286,59 +286,38 @@ def visualize(data, spectrograms):
 # Helper: Prepare CNN Dataset from Spectrograms
 # ============================================================
 def prepare_dataset(data, spectrograms):
-    """
-    Slice spectrograms into (X, y) pairs for CNN training.
-
-    X[i] : spectrogram patch  (freq_bins, SPEC_WIN, n_features)
-    y[i] : Close price PREDICT_STEP trading days ahead of the patch
-
-    FIX 2 – label alignment:
-        The STFT t-axis gives the centre-time (in samples) of each frame.
-        We map frame index i → original signal index via t_axis[i].
-        y is looked up at  round(t_axis[i]) + PREDICT_STEP  in the prices array.
-    """
+    """Slice spectrograms into (X, y) pairs for CNN training."""
     X_all, y_all = [], []
 
     for ticker, df in data.items():
-        stacked     = spectrograms[ticker]["spec"]   # (freq_bins, time_frames, features)
-        t_axis      = spectrograms[ticker]["t"]       # centre-times in samples
-        prices      = df["Close"].values              # normalized prices
+        stacked     = spectrograms[ticker]["spec"]
+        t_axis      = spectrograms[ticker]["t"]
+        prices      = df["Close"].values
+        time_frames = stacked.shape[1]
 
-        time_frames  = stacked.shape[1]
-
-        # FIX 5 – guard SPEC_WIN against too-few frames
         SPEC_WIN = min(30, time_frames - PREDICT_STEP - 2)
         if SPEC_WIN < 5:
             print(f"  ⚠  {ticker}: too few STFT frames ({time_frames}), skipping")
             continue
 
         for i in range(SPEC_WIN, time_frames):
-            # Spectrogram input patch
-            patch = stacked[:, i - SPEC_WIN : i, :]           # (freq_bins, SPEC_WIN, features)
-
-            # FIX 2 – correct label index via t_axis
-            centre_sample = int(round(t_axis[i - 1]))         # end of patch in signal
+            patch         = stacked[:, i - SPEC_WIN : i, :]
+            centre_sample = int(round(t_axis[i - 1]))
             label_idx     = centre_sample + PREDICT_STEP
-
             if label_idx >= len(prices):
                 break
-
             X_all.append(patch)
             y_all.append(prices[label_idx])
 
     if len(X_all) == 0:
-        raise RuntimeError("Dataset is empty — STFT produced too few frames. "
-                           "Lower NPERSEG or collect more data.")
+        raise RuntimeError("Dataset is empty — STFT produced too few frames.")
 
-    X = np.array(X_all, dtype=np.float32)   # (N, freq_bins, SPEC_WIN, features)
+    X = np.array(X_all, dtype=np.float32)
     y = np.array(y_all, dtype=np.float32)
-
-    # Clip extreme dB values for CNN stability
     X = np.clip(X, -80, 0)
-    # Re-normalize patches to [0, 1]  (dB range is negative; -80 is lowest)
     X = (X + 80) / 80
 
-    split = int(0.8 * len(X))
+    split   = int(0.8 * len(X))
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
 
@@ -352,61 +331,34 @@ def prepare_dataset(data, spectrograms):
 
 
 # ============================================================
-# Task 4: CNN Model - Improved Architecture
+# Task 4: CNN Model
 # ============================================================
 def build_cnn_model(input_shape):
-    """
-    3-block CNN regression model with BatchNormalization and Dropout.
-
-    Architecture:
-        Input (freq_bins × time_win × features)
-        ├─ Conv2D(32) + BN + ReLU → MaxPool
-        ├─ Conv2D(64) + BN + ReLU → MaxPool
-        ├─ Conv2D(128) + BN + ReLU → GlobalAvgPool
-        ├─ Dense(256) + Dropout(0.4)
-        ├─ Dense(64)  + Dropout(0.2)
-        └─ Dense(1)   (linear — regression output)
-    """
+    """3-block CNN regression model with BatchNormalization and Dropout."""
     reg = regularizers.l2(1e-4)
 
     model = models.Sequential([
         Input(shape=input_shape),
-
-        # -- Block 1 ------------------------------------------
         layers.Conv2D(32, (3, 3), padding="same", kernel_regularizer=reg),
         layers.BatchNormalization(),
         layers.Activation("relu"),
         layers.MaxPooling2D((2, 2)),
-
-        # -- Block 2 ------------------------------------------
         layers.Conv2D(64, (3, 3), padding="same", kernel_regularizer=reg),
         layers.BatchNormalization(),
         layers.Activation("relu"),
         layers.MaxPooling2D((2, 2)),
-
-        # -- Block 3 ------------------------------------------
         layers.Conv2D(128, (3, 3), padding="same", kernel_regularizer=reg),
         layers.BatchNormalization(),
         layers.Activation("relu"),
-        layers.GlobalAveragePooling2D(),    # avoids flattening size issues
-
-        # -- Fully Connected -----------------------------------
+        layers.GlobalAveragePooling2D(),
         layers.Dense(256, activation="relu", kernel_regularizer=reg),
         layers.Dropout(0.40),
-
         layers.Dense(64, activation="relu"),
         layers.Dropout(0.20),
-
-        # -- Regression Output ---------------------------------
-        layers.Dense(1)             # linear activation
+        layers.Dense(1)
     ])
 
-    model.compile(
-        optimizer="adam",
-        loss="mse",
-        metrics=["mae"]
-    )
-
+    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
     print("\n  CNN model built successfully.")
     print(f"  Input shape  : {input_shape}")
     model.summary()
@@ -424,12 +376,10 @@ def train_model(model, X_train, y_train):
         monitor="val_loss", patience=15,
         restore_best_weights=True, verbose=1
     )
-
     checkpoint = ModelCheckpoint(
         filepath=os.path.join(MODEL_DIR, "cnn_stock_model.keras"),
         monitor="val_loss", save_best_only=True, verbose=1
     )
-
     reduce_lr = ReduceLROnPlateau(
         monitor="val_loss", factor=0.5, patience=7,
         min_lr=1e-6, verbose=1
