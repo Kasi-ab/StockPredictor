@@ -482,20 +482,131 @@ def evaluate_model(model, X_test, y_test):
 
 
 # ============================================================
+# Bonus: Future Price Prediction in Rs
+# ============================================================
+def predict_future(model, data, scalers, spectrograms):
+    """
+    Predict actual future stock prices using the trained CNN.
+
+    Steps:
+        1. Take the latest spectrogram patch for each stock
+        2. Run through CNN → normalized predicted price
+        3. Inverse Min-Max scale → actual price in Rs
+        4. Compare with latest known Close price
+        5. Save forecast chart and text file
+    """
+    print()
+    print("  -- 5-Day Price Forecast -------------------------")
+
+    results = {}
+
+    for ticker in data:
+        scaler      = scalers[ticker]
+        stacked     = spectrograms[ticker]["spec"]
+        time_frames = stacked.shape[1]
+        SPEC_WIN    = min(30, time_frames - 2)
+
+        # Latest spectrogram patch
+        patch = stacked[:, time_frames - SPEC_WIN : time_frames, :]
+        patch = np.clip(patch, -80, 0)
+        patch = (patch + 80) / 80
+        patch = patch[np.newaxis, ...]     # add batch dimension → (1, freq, win, feat)
+
+        # CNN prediction (normalized 0-1)
+        pred_norm = float(model.predict(patch, verbose=0).flatten()[0])
+        pred_norm = np.clip(pred_norm, 0, 1)
+
+        # Inverse scale → actual Rs price
+        # Close is column index 0 in scaler
+        dummy       = np.zeros((1, scaler.n_features_in_))
+        dummy[0, 0] = pred_norm
+        pred_actual = scaler.inverse_transform(dummy)[0, 0]
+
+        # Latest known Close price from raw CSV
+        safe         = ticker.replace(".", "_")
+        raw_csv      = os.path.join(DATA_DIR, f"{safe}_raw.csv")
+        raw_df       = pd.read_csv(raw_csv, index_col=0, parse_dates=True)
+        latest_close = float(raw_df["Close"].iloc[-1])
+        latest_date  = raw_df.index[-1].strftime("%Y-%m-%d")
+
+        change_pct = ((pred_actual - latest_close) / latest_close) * 100
+        direction  = "▲" if change_pct >= 0 else "▼"
+
+        results[ticker] = {
+            "latest_date"  : latest_date,
+            "latest_close" : latest_close,
+            "predicted"    : pred_actual,
+            "change_pct"   : change_pct
+        }
+
+        print(f"\n  {ticker}")
+        print(f"    Latest Close  ({latest_date}) : Rs {latest_close:>10.2f}")
+        print(f"    Predicted (+{PREDICT_STEP} days)        : Rs {pred_actual:>10.2f}")
+        print(f"    Change                     : {direction} {abs(change_pct):.2f}%")
+
+    print("\n  ------------------------------------------------")
+
+    # ── Forecast bar chart ───────────────────────────────────
+    tickers_list  = list(results.keys())
+    latest_prices = [results[t]["latest_close"] for t in tickers_list]
+    pred_prices   = [results[t]["predicted"]    for t in tickers_list]
+    short_names   = [t.split(".")[0]            for t in tickers_list]
+
+    x     = np.arange(len(tickers_list))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bars1 = ax.bar(x - width/2, latest_prices, width,
+                   label="Latest Close (Rs)", color="steelblue", alpha=0.85)
+    bars2 = ax.bar(x + width/2, pred_prices,   width,
+                   label=f"Predicted +{PREDICT_STEP}d (Rs)", color="darkorange", alpha=0.85)
+
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 20,
+                f"Rs{bar.get_height():,.0f}", ha="center", va="bottom", fontsize=8)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 20,
+                f"Rs{bar.get_height():,.0f}", ha="center", va="bottom", fontsize=8)
+
+    ax.set_title(f"5-Day Stock Price Forecast (CNN)", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Stock")
+    ax.set_ylabel("Price (Rs)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    path = os.path.join(IMAGE_DIR, "future_price_forecast.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"\n  Forecast chart saved → {path}")
+
+    # ── Save forecast to text file ───────────────────────────
+    forecast_path = os.path.join(DATA_DIR, "future_forecast.txt")
+    with open(forecast_path, "w", encoding="utf-8") as fh:
+        fh.write("=== 5-Day Stock Price Forecast ===\n\n")
+        for ticker, r in results.items():
+            fh.write(f"{ticker}\n")
+            fh.write(f"  Latest Close  ({r['latest_date']}) : Rs {r['latest_close']:.2f}\n")
+            fh.write(f"  Predicted (+5 days)        : Rs {r['predicted']:.2f}\n")
+            fh.write(f"  Change                     : {r['change_pct']:+.2f}%\n\n")
+    print(f"  Forecast data  saved → {forecast_path}")
+
+    return results
+
+
+# ============================================================
 # Bonus: Export CSVs -> Excel
 # ============================================================
 def export_to_excel():
     """Convert all raw CSVs in data/ to a single Excel file."""
-
     excel_path = os.path.join(DATA_DIR, "stock_data.xlsx")
 
-    # FIX 4 – build sheet mapping dynamically from TICKERS (no hardcoded dots)
     csv_sheets = {}
     for ticker in TICKERS:
         safe = ticker.replace(".", "_")
-        name = ticker.split(".")[0]                          # e.g. "RELIANCE"
+        name = ticker.split(".")[0]
         csv_sheets[f"{safe}_raw.csv"] = f"{name} Raw"
-
     csv_sheets["combined_raw.csv"]        = "Combined Close"
     csv_sheets["combined_normalized.csv"] = "Combined Normalized"
 
@@ -537,14 +648,17 @@ if __name__ == "__main__":
         print("\nStep 4/6 : Preparing CNN Dataset")
         X_train, X_test, y_train, y_test = prepare_dataset(data, spectrograms)
 
-        print("\nStep 4/6 : Building CNN Model")
+        print("\nStep 5/6 : Building CNN Model")
         model = build_cnn_model(input_shape=X_train.shape[1:])
 
-        print("\nStep 5/6 : Training")
+        print("\nStep 6/6 : Training")
         history = train_model(model, X_train, y_train)
 
-        print("\nStep 6/6 : Evaluation")
+        print("\nStep 7/6 : Evaluation")
         metrics = evaluate_model(model, X_test, y_test)
+
+        print("\nStep 8/6 : Future Price Forecast")
+        forecast = predict_future(model, data, scalers, spectrograms)
 
         print("\n" + "=" * 55)
         print("  Pipeline Complete!")
@@ -552,8 +666,8 @@ if __name__ == "__main__":
         print(f"  Final RMSE : {metrics['rmse']:.6f}")
         print(f"  Final MAE  : {metrics['mae']:.6f}")
         print("=" * 55)
-        print("\n  Check the images/ folder for all plots.")
-        print("  Check the models/ folder for saved model.")
+        print("\n  Check images/future_price_forecast.png for forecast chart.")
+        print("  Check data/future_forecast.txt for price predictions.")
 
     except Exception:
         print("\n!!! ERROR !!!")
