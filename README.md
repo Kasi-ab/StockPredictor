@@ -51,6 +51,7 @@ stock_prediction_project/
 │
 ├── main.py                         ← Full pipeline (run this)
 ├── requirements.txt                ← Python dependencies
+├── .gitignore                      ← Git ignore rules
 └── README.md                       ← This file
 ```
 
