@@ -387,17 +387,14 @@ def train_model(model, X_train, y_train):
 
     history = model.fit(
         X_train, y_train,
-        epochs=100,
-        batch_size=32,
+        epochs=100, batch_size=32,
         validation_split=0.2,
         callbacks=[early_stop, checkpoint, reduce_lr],
         verbose=1
     )
 
-    # -- Plot Training History ---------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     fig.suptitle("Training History", fontsize=13, fontweight="bold")
-
     axes[0].plot(history.history["loss"],     label="Train Loss", color="steelblue")
     axes[0].plot(history.history["val_loss"], label="Val Loss",   color="darkorange")
     axes[0].set_title("Loss (MSE)")
@@ -405,7 +402,6 @@ def train_model(model, X_train, y_train):
     axes[0].set_ylabel("MSE")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
-
     axes[1].plot(history.history["mae"],     label="Train MAE", color="steelblue")
     axes[1].plot(history.history["val_mae"], label="Val MAE",   color="darkorange")
     axes[1].set_title("Mean Absolute Error")
@@ -413,7 +409,6 @@ def train_model(model, X_train, y_train):
     axes[1].set_ylabel("MAE")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
-
     plt.tight_layout()
     path = os.path.join(IMAGE_DIR, "training_history.png")
     plt.savefig(path, dpi=150)
@@ -428,14 +423,12 @@ def train_model(model, X_train, y_train):
 # ============================================================
 def evaluate_model(model, X_test, y_test):
     """Evaluate using MSE/RMSE/MAE and plot actual vs predicted."""
-
     print()
 
     y_pred = model.predict(X_test, verbose=0).flatten()
-
-    mse  = float(np.mean((y_pred - y_test) ** 2))
-    mae  = float(np.mean(np.abs(y_pred - y_test)))
-    rmse = float(np.sqrt(mse))
+    mse    = float(np.mean((y_pred - y_test) ** 2))
+    mae    = float(np.mean(np.abs(y_pred - y_test)))
+    rmse   = float(np.sqrt(mse))
 
     print(f"  -- Evaluation Results --------------------------")
     print(f"  MSE  (Mean Squared Error)      : {mse:.6f}")
@@ -443,10 +436,8 @@ def evaluate_model(model, X_test, y_test):
     print(f"  MAE  (Mean Absolute Error)     : {mae:.6f}")
     print(f"  ------------------------------------------------")
 
-    # -- Actual vs Predicted figure ----------------------------
     fig, axes = plt.subplots(2, 1, figsize=(13, 8))
     fig.suptitle("CNN Stock Price Prediction - Evaluation", fontsize=14, fontweight="bold")
-
     axes[0].plot(y_test, label="Actual Price",    color="steelblue",  linewidth=1.2)
     axes[0].plot(y_pred, label="Predicted Price", color="darkorange",
                  linewidth=1.2, linestyle="--")
@@ -460,8 +451,6 @@ def evaluate_model(model, X_test, y_test):
                  transform=axes[0].transAxes, fontsize=9,
                  verticalalignment="top",
                  bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6))
-
-    # Scatter plot — perfect = diagonal
     min_val = min(float(y_test.min()), float(y_pred.min()))
     max_val = max(float(y_test.max()), float(y_pred.max()))
     axes[1].scatter(y_test, y_pred, alpha=0.4, s=10, color="purple")
@@ -472,14 +461,12 @@ def evaluate_model(model, X_test, y_test):
     axes[1].set_ylabel("Predicted Price")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
-
     plt.tight_layout()
     path = os.path.join(IMAGE_DIR, "actual_vs_predicted.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"\n  Saved → {path}")
 
-    # -- Save metrics ------------------------------------------
     metrics_path = os.path.join(DATA_DIR, "evaluation_metrics.txt")
     with open(metrics_path, "w", encoding="utf-8") as fh:
         fh.write("=== CNN Stock Prediction - Evaluation Metrics ===\n\n")
