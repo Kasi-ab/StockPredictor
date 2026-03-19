@@ -1,0 +1,9 @@
+=== CNN Stock Prediction - Evaluation Metrics ===
+
+MSE  : 0.014617
+RMSE : 0.120902
+MAE  : 0.103184
+
+Test samples : 172
+Tickers      : RELIANCE.NS, INFY.NS, WIPRO.NS, TCS.NS
+Date range   : 2018-01-01 -> 2026-01-01

@@ -1,0 +1,25 @@
+# Data Collection
+yfinance==0.2.36
+
+# Data Processing
+numpy==1.26.4
+pandas==2.2.1
+
+# Signal Processing
+scipy==1.13.0
+
+# Visualization
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# Deep Learning
+tensorflow==2.16.1
+
+# Notebook (optional)
+jupyter==1.0.0
+ipykernel==6.29.4
+
+# Utilities
+scikit-learn==1.4.2
+tqdm==4.66.2
+openpyxl==3.1.2
