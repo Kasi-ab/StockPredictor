@@ -176,7 +176,7 @@ Input  (65 × 30 × 5)
 ---
 
 ## 📊 Results
-
+ 
 | Metric | Value |
 |--------|-------|
 | MSE  (Mean Squared Error) | 0.014617 |
@@ -185,10 +185,25 @@ Input  (65 × 30 × 5)
 | Best Epoch | 73 / 88 |
 | Training Days | 1947 |
 | Features per Stock | 5 |
-
+ 
 > All prices are Min-Max normalized to [0, 1] scale.
 > An MAE of ~0.10 means predictions are off by ~10% of the price range on average.
-
+> Results may vary slightly between runs due to random weight initialization — the best model is automatically saved to `models/cnn_stock_model.keras` during training.
+ 
+---
+ 
+## 📈 Sample 5-Day Price Forecast (Latest Run)
+ 
+| Stock | Latest Close | Predicted (+5 days) | Change |
+|-------|-------------|---------------------|--------|
+| RELIANCE.NS | ₹ 1,570.40 | ₹ 1,407.11 | ▼ 10.40% |
+| INFY.NS | ₹ 1,615.40 | ₹ 1,544.93 | ▼ 4.36% |
+| WIPRO.NS | ₹ 256.65 | ₹ 259.42 | ▲ 1.08% |
+| TCS.NS | ₹ 3,148.96 | ₹ 3,041.99 | ▼ 3.40% |
+ 
+> Forecast is generated automatically at the end of each run.
+> See `data/future_forecast.txt` and `images/future_price_forecast.png` for full details.
+ 
 ---
 
 ## 📦 Dependencies
